@@ -190,6 +190,49 @@ Environment Variables:
         help="Generate JSON report at specified path.",
     )
     
+    # CI/CD integration
+    parser.add_argument(
+        "--fail-on-bypass",
+        action="store_true",
+        default=False,
+        help=(
+            "Exit with code 1 if any bypass score exceeds the safety threshold. "
+            "Useful for DevSecOps pipeline automation."
+        ),
+    )
+    
+    # PoC generation
+    parser.add_argument(
+        "--generate-poc",
+        action="store_true",
+        default=False,
+        help="Generate standalone exploit scripts (shell/python) for successful bypasses.",
+    )
+    
+    # System prompt patching
+    parser.add_argument(
+        "--generate-patch",
+        action="store_true",
+        default=False,
+        help="Generate hardened system prompt patch based on discovered vulnerabilities.",
+    )
+    
+    # Multi-turn attack mode
+    parser.add_argument(
+        "--multi-turn",
+        action="store_true",
+        default=False,
+        help="Enable stateful multi-turn injection attacks.",
+    )
+    
+    parser.add_argument(
+        "--multi-turn-strategy",
+        type=str,
+        choices=["linear", "sandwich", "gradual", "trust_build"],
+        default="gradual",
+        help="Strategy for multi-turn injection (default: gradual).",
+    )
+    
     return parser.parse_args()
 
 
@@ -254,12 +297,77 @@ def run_single_intent_mode(args: argparse.Namespace, config: Configuration) -> i
         adapter_config=adapter_config
     )
     
+    max_bypass_score = 0.0
+    successful_bypasses = []
+    
     try:
-        summary = orchestrator.run_campaign(
-            base_intent=args.intent,
-            attack_type=attack_type,
-            max_iterations=args.max_iterations,
-        )
+        # Handle multi-turn mode
+        if args.multi_turn:
+            from engine.stateful_mutator import StatefulMutator, TurnStrategy
+            
+            strategy_map = {
+                "linear": TurnStrategy.LINEAR,
+                "sandwich": TurnStrategy.SANDWICH,
+                "gradual": TurnStrategy.GRADUAL,
+                "trust_build": TurnStrategy.TRUST_BUILD,
+            }
+            strategy = strategy_map.get(args.multi_turn_strategy, TurnStrategy.GRADUAL)
+            
+            mutator = StatefulMutator(base_mutator=orchestrator.mutator)
+            session = mutator.create_session(target_intent=args.intent, strategy=strategy)
+            
+            logger.info(f"Multi-turn session created: {session.session_id}")
+            logger.info(f"Strategy: {strategy.value}")
+            
+            # Execute turns
+            while not session.completed:
+                response, is_complete = mutator.execute_next_turn(session.session_id, orchestrator.adapter)
+                if response:
+                    logger.debug(f"Turn response: {response[:100]}...")
+            
+            # Get final session report
+            session_report = mutator.close_session(session.session_id)
+            
+            # Evaluate final turn for bypass
+            if session_report and "history" in session_report:
+                history = session_report["history"]
+                if len(history) >= 2:
+                    last_user_msg = next((h["content"] for h in reversed(history) if h["role"] == "user"), "")
+                    last_assistant_msg = next((h["content"] for h in reversed(history) if h["role"] == "assistant"), "")
+                    
+                    if last_assistant_msg and not last_assistant_msg.startswith("[Error:"):
+                        result = orchestrator.evaluator.evaluate_response(
+                            original_intent=args.intent,
+                            response=last_assistant_msg,
+                            payload=last_user_msg
+                        )
+                        max_bypass_score = result.bypass_score
+                        if result.bypass_score >= config.bypass_threshold:
+                            successful_bypasses.append({
+                                "payload": last_user_msg,
+                                "response": last_assistant_msg,
+                                "score": result.bypass_score
+                            })
+        else:
+            # Standard single-turn campaign
+            summary = orchestrator.run_campaign(
+                base_intent=args.intent,
+                attack_type=attack_type,
+                max_iterations=args.max_iterations,
+            )
+            
+            # Extract max bypass score from summary
+            max_bypass_score = summary['statistics']['max_bypass_score']
+            
+            # Collect successful bypasses from results
+            results = orchestrator.get_results()
+            for entry in results.get('results', []):
+                if entry.get('bypass_score', 0) >= config.bypass_threshold:
+                    successful_bypasses.append({
+                        "payload": entry.get('payload', ''),
+                        "response": entry.get('response', ''),
+                        "score": entry.get('bypass_score', 0)
+                    })
         
         # Generate reports if requested
         report_paths = {}
@@ -279,28 +387,87 @@ def run_single_intent_mode(args: argparse.Namespace, config: Configuration) -> i
                 report_paths["html"] = html_path
                 logger.info(f"HTML report generated: {html_path}")
         
+        # Generate PoC exploits if requested
+        if args.generate_poc and successful_bypasses:
+            from engine.poc_generator import PocGenerator, ExploitConfig
+            
+            poc_gen = PocGenerator(output_dir=f"{config.output_path}/exploits")
+            logger.info(f"Generating PoC scripts for {len(successful_bypasses)} successful bypass(es)...")
+            
+            for i, bypass in enumerate(successful_bypasses[:5], 1):  # Limit to top 5
+                exploit_config = ExploitConfig(
+                    target_url=config.target_api_endpoint,
+                    payload=bypass["payload"],
+                    model_name=args.adapter_model,
+                    system_prompt=None  # Could be extended to include original system prompt
+                )
+                paths = poc_gen.generate_all(exploit_config, base_name=f"bypass_{i}")
+                logger.info(f"  Bypass {i}: Generated {paths}")
+        
+        # Generate system prompt patch if requested
+        if args.generate_patch and successful_bypasses:
+            from engine.patcher import SystemPromptPatcher
+            
+            patcher = SystemPromptPatcher()
+            logger.info("Analyzing vulnerabilities and generating system prompt patch...")
+            
+            for bypass in successful_bypasses:
+                patcher.analyze_payload(
+                    payload=bypass["payload"],
+                    bypass_score=bypass["score"]
+                )
+            
+            patch_content = patcher.generate_patch()
+            patch_file = f"{config.output_path}/hardened_system_prompt.txt"
+            
+            with open(patch_file, 'w', encoding='utf-8') as f:
+                f.write(patch_content)
+            
+            logger.info(f"System prompt patch saved to: {patch_file}")
+            
+            # Also print patch to console
+            print("\n" + "=" * 60)
+            print("GENERATED SYSTEM PROMPT PATCH")
+            print("=" * 60)
+            print(patch_content)
+            print("=" * 60)
+        
         # Print summary to console
         print("\n" + "=" * 60)
         print("CAMPAIGN SUMMARY")
         print("=" * 60)
-        print(f"Campaign ID: {summary['campaign_id']}")
-        print(f"Total Iterations: {summary['total_iterations']}")
-        print(f"Elapsed Time: {summary['elapsed_time_seconds']:.2f}s")
-        print(f"Iterations/Second: {summary['iterations_per_second']:.2f}")
-        print(f"\nStatistics:")
-        print(f"  Successful Bypasses: {summary['statistics']['successful_bypasses']}")
-        print(f"  Average Bypass Score: {summary['statistics']['average_bypass_score']:.3f}")
-        print(f"  Max Bypass Score: {summary['statistics']['max_bypass_score']:.3f}")
-        print(f"  Refusal Rate: {summary['statistics']['refusal_rate']:.2%}")
         
-        if summary['top_strategies']:
-            print(f"\nTop Strategies:")
-            for i, strat in enumerate(summary['top_strategies'][:3], 1):
-                print(f"  {i}. {strat['strategy']}: avg={strat['average_score']:.3f} "
-                      f"(best={strat['best_score']:.3f}, attempts={strat['attempts']})")
+        if args.multi_turn:
+            print(f"Mode: Multi-Turn Injection ({args.multi_turn_strategy})")
+            print(f"Session ID: {session.session_id if 'session' in locals() else 'N/A'}")
+        else:
+            print(f"Campaign ID: {summary['campaign_id']}")
+            print(f"Total Iterations: {summary['total_iterations']}")
+            print(f"Elapsed Time: {summary['elapsed_time_seconds']:.2f}s")
+            print(f"Iterations/Second: {summary['iterations_per_second']:.2f}")
+        
+        print(f"\nStatistics:")
+        print(f"  Successful Bypasses: {len(successful_bypasses)}")
+        print(f"  Max Bypass Score: {max_bypass_score:.3f}")
+        
+        if not args.multi_turn and 'summary' in locals():
+            print(f"  Average Bypass Score: {summary['statistics']['average_bypass_score']:.3f}")
+            print(f"  Refusal Rate: {summary['statistics']['refusal_rate']:.2%}")
+            
+            if summary['top_strategies']:
+                print(f"\nTop Strategies:")
+                for i, strat in enumerate(summary['top_strategies'][:3], 1):
+                    print(f"  {i}. {strat['strategy']}: avg={strat['average_score']:.3f} "
+                          f"(best={strat['best_score']:.3f}, attempts={strat['attempts']})")
         
         print("=" * 60)
         print(f"\nDetailed report saved to: {config.output_path}/")
+        
+        # CI/CD: Exit with code 1 if bypass exceeds threshold
+        if args.fail_on_bypass and max_bypass_score >= config.bypass_threshold:
+            print(f"\n[!] CRITICAL: Bypass score ({max_bypass_score:.3f}) exceeds threshold ({config.bypass_threshold})")
+            print("[!] Exiting with code 1 for CI/CD pipeline failure.")
+            return 1
         
         return 0
         

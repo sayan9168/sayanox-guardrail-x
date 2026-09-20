@@ -8,12 +8,12 @@ __pycache__/
 venv/
 node_modules/
 
-# Logs and temporary files
+# Logs and temp files
 *.log
 *.tmp
 *.swp
 
-# Environment files
+# Environment
 .env
 .env.local
 *.env.*
@@ -22,18 +22,20 @@ node_modules/
 .vscode/
 .idea/
 
-# Build artifacts
-dist/
-build/
-target/
-
 # Coverage reports
 .coverage
 coverage/
 htmlcov/
 
-# Testing
-.pytest_cache/
+# Build artifacts
+dist/
+build/
+target/
+*.egg-info/
+
+# MyPy cache
 .mypy_cache/
+
+# Pytest cache
+.pytest_cache/
 ```.next/
-.next/
