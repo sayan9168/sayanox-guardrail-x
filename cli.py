@@ -152,6 +152,44 @@ Environment Variables:
         help="Qwen-Coder API endpoint (overrides env var).",
     )
     
+    # Adapter configuration
+    parser.add_argument(
+        "--adapter",
+        type=str,
+        choices=["openai", "ollama", "generic_rest"],
+        default="openai",
+        help="Target adapter type to use (default: openai).",
+    )
+    
+    parser.add_argument(
+        "--adapter-model",
+        type=str,
+        default=None,
+        help="Model name for the adapter (e.g., 'gpt-4', 'llama3').",
+    )
+    
+    parser.add_argument(
+        "--adapter-endpoint",
+        type=str,
+        default=None,
+        help="Custom endpoint for the adapter (overrides default).",
+    )
+    
+    # Report configuration
+    parser.add_argument(
+        "--html-report",
+        type=str,
+        default=None,
+        help="Generate styled HTML report at specified path.",
+    )
+    
+    parser.add_argument(
+        "--json-report",
+        type=str,
+        default=None,
+        help="Generate JSON report at specified path.",
+    )
+    
     return parser.parse_args()
 
 
@@ -197,8 +235,24 @@ def run_single_intent_mode(args: argparse.Namespace, config: Configuration) -> i
     logger.info(f"Starting single-intent campaign")
     logger.info(f"Intent: {args.intent[:50]}...")
     logger.info(f"Attack Type: {attack_type.value}")
+    logger.info(f"Adapter: {args.adapter}")
     
-    orchestrator = RedTeamOrchestrator(config)
+    # Build adapter configuration
+    adapter_config = {}
+    if args.adapter_model:
+        adapter_config["model"] = args.adapter_model
+    if args.adapter_endpoint:
+        if args.adapter == "ollama":
+            adapter_config["endpoint"] = args.adapter_endpoint
+        else:
+            # For OpenAI-compatible, update target endpoint
+            config.target_api_endpoint = args.adapter_endpoint
+    
+    orchestrator = RedTeamOrchestrator(
+        config=config,
+        adapter_type=args.adapter,
+        adapter_config=adapter_config
+    )
     
     try:
         summary = orchestrator.run_campaign(
@@ -206,6 +260,24 @@ def run_single_intent_mode(args: argparse.Namespace, config: Configuration) -> i
             attack_type=attack_type,
             max_iterations=args.max_iterations,
         )
+        
+        # Generate reports if requested
+        report_paths = {}
+        if args.html_report or args.json_report:
+            from reports.generator import ReportGenerator
+            
+            results = orchestrator.get_results()
+            generator = ReportGenerator(output_dir=config.output_path)
+            
+            if args.json_report:
+                json_path = generator.generate_json_report(results, filename=args.json_report)
+                report_paths["json"] = json_path
+                logger.info(f"JSON report generated: {json_path}")
+            
+            if args.html_report:
+                html_path = generator.generate_html_report(results, filename=args.html_report)
+                report_paths["html"] = html_path
+                logger.info(f"HTML report generated: {html_path}")
         
         # Print summary to console
         print("\n" + "=" * 60)

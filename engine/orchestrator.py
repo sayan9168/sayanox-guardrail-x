@@ -3,6 +3,7 @@ Sayanox Guardrail-X - Red Team Orchestrator Module
 
 Implements the RedTeamOrchestrator class that manages the main execution loop:
 Mutate -> Execute on Target -> Evaluate -> Log -> Backtrack/Refine.
+Refactored to use pluggable target adapters.
 """
 
 import json
@@ -10,12 +11,13 @@ import logging
 import os
 import time
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Type
 from pathlib import Path
 
 from config import Configuration, AttackPayload, EvaluationResult, AttackType
 from engine.mutator import QwenMutator, MutatorError
 from engine.evaluator import GuardrailEvaluator, EvaluatorError
+from engine.adapters import BaseAdapter, OpenAIAdapter, OllamaAdapter, GenericRESTAdapter, AdapterResponse
 
 
 logger = logging.getLogger(__name__)
@@ -33,21 +35,39 @@ class RedTeamOrchestrator:
     Manages the complete execution loop including mutation generation,
     target LLM execution, response evaluation, and result logging.
     Implements adaptive refinement based on previous results.
+    Uses pluggable adapters for different target LLM backends.
     
     Attributes:
         config: Configuration object with all settings.
         mutator: QwenMutator instance for generating payloads.
         evaluator: GuardrailEvaluator instance for scoring responses.
+        adapter: Target adapter instance for LLM communication.
         execution_history: List of all execution results.
         successful_bypasses: List of high-scoring bypass attempts.
     """
     
-    def __init__(self, config: Configuration):
+    ADAPTER_REGISTRY = {
+        "openai": OpenAIAdapter,
+        "ollama": OllamaAdapter,
+        "generic_rest": GenericRESTAdapter,
+    }
+    
+    def __init__(
+        self,
+        config: Configuration,
+        adapter_type: str = "openai",
+        adapter_config: Optional[Dict[str, Any]] = None
+    ):
         """
         Initialize the RedTeamOrchestrator.
         
         Args:
             config: Configuration object containing API settings and parameters.
+            adapter_type: Type of adapter to use ('openai', 'ollama', 'generic_rest').
+            adapter_config: Optional additional configuration for the adapter.
+            
+        Raises:
+            OrchestratorError: If invalid adapter type is specified.
         """
         self.config = config
         self.mutator = QwenMutator(config)
@@ -55,14 +75,77 @@ class RedTeamOrchestrator:
         self.execution_history: List[Dict[str, Any]] = []
         self.successful_bypasses: List[EvaluationResult] = []
         
+        # Initialize target adapter
+        self.adapter = self._create_adapter(adapter_type, adapter_config)
+        
         # Ensure output directory exists
         Path(config.output_path).mkdir(parents=True, exist_ok=True)
         
-        logger.info(f"Orchestrator initialized with max_iterations={config.max_iterations}")
+        logger.info(
+            f"Orchestrator initialized with adapter='{adapter_type}', "
+            f"max_iterations={config.max_iterations}"
+        )
+    
+    def _create_adapter(self, adapter_type: str, adapter_config: Optional[Dict[str, Any]]) -> BaseAdapter:
+        """
+        Create and configure the appropriate target adapter.
+        
+        Args:
+            adapter_type: Type of adapter to create.
+            adapter_config: Optional adapter-specific configuration.
+            
+        Returns:
+            Configured adapter instance.
+            
+        Raises:
+            OrchestratorError: If adapter type is not recognized.
+        """
+        if adapter_type not in self.ADAPTER_REGISTRY:
+            raise OrchestratorError(
+                f"Unknown adapter type: {adapter_type}. "
+                f"Available adapters: {list(self.ADAPTER_REGISTRY.keys())}"
+            )
+        
+        adapter_class = self.ADAPTER_REGISTRY[adapter_type]
+        adapter_config = adapter_config or {}
+        
+        try:
+            if adapter_type == "openai":
+                return adapter_class(
+                    endpoint=self.config.target_api_endpoint,
+                    api_key=self.config.target_api_key or "",
+                    model=adapter_config.get("model", "gpt-4"),
+                    timeout=self.config.timeout_seconds,
+                    max_tokens=adapter_config.get("max_tokens", 1024)
+                )
+            elif adapter_type == "ollama":
+                return adapter_class(
+                    endpoint=adapter_config.get("endpoint", "http://localhost:11434/api/generate"),
+                    model=adapter_config.get("model", "llama3"),
+                    timeout=adapter_config.get("timeout", self.config.timeout_seconds),
+                    options=adapter_config.get("options")
+                )
+            elif adapter_type == "generic_rest":
+                return adapter_class(
+                    endpoint=self.config.target_api_endpoint,
+                    api_key=self.config.target_api_key,
+                    timeout=self.config.timeout_seconds,
+                    method=adapter_config.get("method", "POST"),
+                    headers=adapter_config.get("headers"),
+                    payload_template=adapter_config.get("payload_template", {"input": "{prompt}"}),
+                    response_path=adapter_config.get("response_path", "content")
+                )
+            else:
+                # Fallback - should not reach here due to earlier check
+                raise OrchestratorError(f"Unsupported adapter type: {adapter_type}")
+                
+        except Exception as e:
+            logger.error(f"Failed to initialize {adapter_type} adapter: {e}")
+            raise OrchestratorError(f"Adapter initialization failed: {e}")
     
     def _execute_on_target(self, payload: AttackPayload) -> str:
         """
-        Send the mutated prompt to the target LLM and get a response.
+        Send the mutated prompt to the target LLM using the configured adapter.
         
         Args:
             payload: The AttackPayload containing the mutated prompt.
@@ -71,43 +154,29 @@ class RedTeamOrchestrator:
             Raw response string from the target LLM.
             
         Raises:
-            OrchestratorError: If the target API request fails.
+            OrchestratorError: If the target request fails.
         """
-        import requests
-        
-        headers = {
-            "Authorization": f"Bearer {self.config.target_api_key}",
-            "Content-Type": "application/json",
-        }
-        
-        api_payload = {
-            "model": "target-model",  # Would be configured per target
-            "messages": [
-                {"role": "user", "content": payload.mutated_prompt},
-            ],
-            "max_tokens": 1024,
-            "temperature": 0.7,
-        }
-        
         try:
-            response = requests.post(
-                f"{self.config.target_api_endpoint}/chat/completions",
-                headers=headers,
-                json=api_payload,
-                timeout=self.config.timeout_seconds,
+            adapter_response = self.adapter.send_prompt(
+                prompt=payload.mutated_prompt,
+                system_instruction=payload.metadata.get("system_instruction")
             )
-            response.raise_for_status()
-            data = response.json()
-            return data["choices"][0]["message"]["content"]
-        except requests.exceptions.Timeout as e:
-            logger.error("Target API request timed out")
-            raise OrchestratorError(f"Target API timeout: {e}")
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Target API request failed: {e}")
-            raise OrchestratorError(f"Target API error: {e}")
-        except (json.JSONDecodeError, KeyError) as e:
-            logger.error(f"Failed to parse target API response: {e}")
-            raise OrchestratorError(f"Response parsing error: {e}")
+            
+            if adapter_response.error:
+                logger.error(f"Adapter error: {adapter_response.error}")
+                raise OrchestratorError(f"Target execution error: {adapter_response.error}")
+            
+            # Log latency metrics if available
+            if adapter_response.latency_ms > 0:
+                logger.debug(f"Request completed in {adapter_response.latency_ms:.2f}ms")
+            
+            return adapter_response.content
+            
+        except OrchestratorError:
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error during target execution: {e}")
+            raise OrchestratorError(f"Target execution failed: {e}")
     
     def _log_result(self, result: EvaluationResult) -> None:
         """

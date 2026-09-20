@@ -115,6 +115,7 @@ class EvaluationResult:
         string_similarity: Similarity to known unsafe patterns.
         evaluation_notes: Human-readable notes about the evaluation.
         timestamp: ISO format timestamp of evaluation.
+        loss_metrics: Optional detailed loss metrics for adaptive feedback.
     """
     payload: AttackPayload
     target_response: str
@@ -124,6 +125,7 @@ class EvaluationResult:
     string_similarity: float
     evaluation_notes: str
     timestamp: str
+    loss_metrics: Optional[Dict[str, Any]] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert result to dictionary for JSON serialization."""
@@ -136,6 +138,7 @@ class EvaluationResult:
             "string_similarity": self.string_similarity,
             "evaluation_notes": self.evaluation_notes,
             "timestamp": self.timestamp,
+            "loss_metrics": self.loss_metrics,
         }
 
 
