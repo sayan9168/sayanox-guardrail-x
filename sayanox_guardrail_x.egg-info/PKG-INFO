@@ -1,6 +1,57 @@
+Metadata-Version: 2.4
+Name: sayanox-guardrail-x
+Version: 1.0.0
+Summary: Autonomous AI Red-Teaming Engine for discovering prompt injections, guardrail bypasses, and system leaks in target LLMs
+Home-page: https://github.com/sayanox/guardrail-x
+Author: Sayan Mahata
+Author-email: Sayan Mahata <sayanox@proton.me>
+Maintainer: Sayanox Tech
+Maintainer-email: Sayanox Tech <sayanox@proton.me>
+License: MIT
+Project-URL: Homepage, https://github.com/sayanox/guardrail-x
+Project-URL: Repository, https://github.com/sayanox/guardrail-x.git
+Project-URL: Documentation, https://github.com/sayanox/guardrail-x#readme
+Project-URL: Issues, https://github.com/sayanox/guardrail-x/issues
+Project-URL: Changelog, https://github.com/sayanox/guardrail-x/releases
+Keywords: ai-security,red-teaming,llm-security,prompt-injection,guardrail-evaluation,adversarial-testing,ai-safety,cybersecurity,llm-testing,security-audit
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: Intended Audience :: Information Technology
+Classifier: Intended Audience :: Science/Research
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Topic :: Security
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
+Classifier: Topic :: Software Development :: Testing
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: requests>=2.31.0
+Requires-Dist: python-dotenv>=1.0.0
+Requires-Dist: typing-extensions>=4.0.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.0.0; extra == "dev"
+Requires-Dist: black>=23.0.0; extra == "dev"
+Requires-Dist: isort>=5.12.0; extra == "dev"
+Requires-Dist: flake8>=6.0.0; extra == "dev"
+Requires-Dist: mypy>=1.0.0; extra == "dev"
+Provides-Extra: docs
+Requires-Dist: mkdocs>=1.5.0; extra == "docs"
+Requires-Dist: mkdocs-material>=9.0.0; extra == "docs"
+Dynamic: author
+Dynamic: home-page
+Dynamic: license-file
+Dynamic: maintainer
+Dynamic: requires-python
+
 # Sayanox Guardrail-X
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22857502.svg)](https://doi.org/10.5281/zenodo.22857502)
 [![PyPI version](https://badge.fury.io/py/sayanox-guardrail-x.svg)](https://badge.fury.io/py/sayanox-guardrail-x)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Security Scan](https://github.com/sayanox/guardrail-x/actions/workflows/security-scan.yml/badge.svg)](https://github.com/sayanox/guardrail-x/actions/workflows/security-scan.yml)
@@ -447,8 +498,7 @@ If you use Sayanox Guardrail-X in your research, please cite:
   title = {Sayanox Guardrail-X: Autonomous AI Red-Teaming Engine},
   year = {2025},
   publisher = {GitHub},
-  url = {https://github.com/sayanox/guardrail-x},
-  doi = {10.5281/zenodo.22857502}
+  url = {https://github.com/sayanox/guardrail-x}
 }
 ```
 
@@ -456,5 +506,4 @@ If you use Sayanox Guardrail-X in your research, please cite:
 
 **Author**: Sayan Mahata / Sayanox Tech  
 **Contact**: [GitHub](https://github.com/sayanox)  
-**Version**: 1.0.0  
-**DOI**: [10.5281/zenodo.22857502](https://doi.org/10.5281/zenodo.22857502)
+**Version**: 1.0.0
