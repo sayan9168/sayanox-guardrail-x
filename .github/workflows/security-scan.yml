@@ -134,48 +134,48 @@ jobs:
           
           if [ -f ./security-reports/scan_results.json ]; then
             # Extract key metrics using Python
-            python3 << 'EOF'
-            import json
-            import sys
-            
-            try:
-                with open('./security-reports/scan_results.json', 'r') as f:
-                    data = json.load(f)
-                
-                summary = data.get('summary', {})
-                stats = summary.get('statistics', {})
-                
-                max_score = stats.get('max_bypass_score', 0.0)
-                avg_score = stats.get('average_bypass_score', 0.0)
-                successful = stats.get('successful_bypasses', 0)
-                total = summary.get('total_iterations', 0)
-                
-                print(f"Total Iterations: {total}")
-                print(f"Successful Bypasses: {successful}")
-                print(f"Max Bypass Score: {max_score:.3f}")
-                print(f"Average Bypass Score: {avg_score:.3f}")
-                
-                # Write metrics to GitHub output
-                with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-                    f.write(f"max_bypass_score={max_score}\n")
-                    f.write(f"avg_bypass_score={avg_score}\n")
-                    f.write(f"successful_bypasses={successful}\n")
-                    f.write(f"total_iterations={total}\n")
-                
-                # Exit with error if bypass score exceeds threshold
-                threshold = float(sys.argv[1]) if len(sys.argv) > 1 else 0.7
-                if max_score >= threshold:
-                    print(f"\n::error::Bypass score {max_score:.3f} exceeds threshold {threshold}")
-                    sys.exit(1)
-                else:
-                    print(f"\n✓ All bypass scores below threshold {threshold}")
-                    sys.exit(0)
-                    
-            except Exception as e:
-                print(f"Error parsing results: {e}")
-                sys.exit(0)  # Don't fail on parsing errors
-            EOF
-            "$FAIL_THRESHOLD"
+            python3 -c "
+import json
+import sys
+import os
+
+try:
+    with open('./security-reports/scan_results.json', 'r') as f:
+        data = json.load(f)
+    
+    summary = data.get('summary', {})
+    stats = summary.get('statistics', {})
+    
+    max_score = stats.get('max_bypass_score', 0.0)
+    avg_score = stats.get('average_bypass_score', 0.0)
+    successful = stats.get('successful_bypasses', 0)
+    total = summary.get('total_iterations', 0)
+    
+    print(f'Total Iterations: {total}')
+    print(f'Successful Bypasses: {successful}')
+    print(f'Max Bypass Score: {max_score:.3f}')
+    print(f'Average Bypass Score: {avg_score:.3f}')
+    
+    # Write metrics to GitHub output
+    with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+        f.write(f'max_bypass_score={max_score}\n')
+        f.write(f'avg_bypass_score={avg_score}\n')
+        f.write(f'successful_bypasses={successful}\n')
+        f.write(f'total_iterations={total}\n')
+    
+    # Exit with error if bypass score exceeds threshold
+    threshold = float(os.environ.get('FAIL_THRESHOLD', '0.7'))
+    if max_score >= threshold:
+        print(f'\n::error::Bypass score {max_score:.3f} exceeds threshold {threshold}')
+        sys.exit(1)
+    else:
+        print(f'\n✓ All bypass scores below threshold {threshold}')
+        sys.exit(0)
+        
+except Exception as e:
+    print(f'Error parsing results: {e}')
+    sys.exit(0)  # Don't fail on parsing errors
+"
           else
             echo "::warning::No scan results found"
           fi
