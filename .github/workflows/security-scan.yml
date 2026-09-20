@@ -134,9 +134,10 @@ jobs:
           
           if [ -f ./security-reports/scan_results.json ]; then
             # Extract key metrics using Python
-            python3 << 'EOF'
+            python3 << 'EOF' "$FAIL_THRESHOLD"
             import json
             import sys
+            import os
             
             try:
                 with open('./security-reports/scan_results.json', 'r') as f:
@@ -175,7 +176,6 @@ jobs:
                 print(f"Error parsing results: {e}")
                 sys.exit(0)  # Don't fail on parsing errors
             EOF
-            "$FAIL_THRESHOLD"
           else
             echo "::warning::No scan results found"
           fi
